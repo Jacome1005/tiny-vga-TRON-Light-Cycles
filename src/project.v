@@ -39,7 +39,7 @@ module tt_um_tron_game  (
     localparam CELL_W    = 10;          // pixels per cell (in halved coords)
     localparam CELL_H    = 10;
 
-    localparam MAX_LEN   = 30;           // Trail length
+    localparam MAX_LEN   = 24;           // Trail length
     localparam LEN_BITS  = 5;           // ceil(log2(32))
 
     // Shared direction encoding
