@@ -39,7 +39,7 @@ module tt_um_tron_game  (
     localparam CELL_W    = 10;          // pixels per cell (in halved coords)
     localparam CELL_H    = 10;
 
-    localparam MAX_LEN   = 20;           // Trail length
+    localparam MAX_LEN   = 32;           // Trail length
     localparam LEN_BITS  = 5;           // ceil(log2(32))
 
     // Shared direction encoding
@@ -150,26 +150,48 @@ module tt_um_tron_game  (
                       (nxt_row_2 == 5'd0)  || (nxt_row_2 == 5'd23);
 
     // ==========================================
-    // TRAIL COLLISION
+    // TRAIL COLLISION (sequential scanner)
     // ==========================================
-    genvar gc;
-    wire [MAX_LEN-1:0] self_match_1, self_match_2;
-    wire [MAX_LEN-1:0] cross_1to2,   cross_2to1;
- 
-    generate
-        for (gc = 0; gc < MAX_LEN; gc = gc + 1) begin : col_chk
-            assign self_match_1[gc] = (seg_col_1[gc] == nxt_col_1) && (seg_row_1[gc] == nxt_row_1);
-            assign self_match_2[gc] = (seg_col_2[gc] == nxt_col_2) && (seg_row_2[gc] == nxt_row_2);
-            assign cross_1to2[gc]   = (seg_col_2[gc] == nxt_col_1) && (seg_row_2[gc] == nxt_row_1);
-            assign cross_2to1[gc]   = (seg_col_1[gc] == nxt_col_2) && (seg_row_1[gc] == nxt_row_2);
-        end
-    endgenerate
+    reg [LEN_BITS-1:0] scan_idx;
+    reg scanning;
+    reg self_hit_1, self_hit_2, cross_hit_1, cross_hit_2;
 
-    wire self_hit_1    = |self_match_1;
-    wire self_hit_2    = |self_match_2;
-    wire cross_hit_1   = |cross_1to2;
-    wire cross_hit_2   = |cross_2to1;
-    wire head_collide  = (nxt_col_1 == nxt_col_2) && (nxt_row_1 == nxt_row_2);
+    wire scan_start = frame_tick;
+
+    always @(posedge clk) begin
+        if (~rst_n) begin
+            scan_idx    <= 0;
+            scanning    <= 1'b0;
+            self_hit_1  <= 1'b0;
+            self_hit_2  <= 1'b0;
+            cross_hit_1 <= 1'b0;
+            cross_hit_2 <= 1'b0;
+        end else if (game_tick) begin
+            self_hit_1  <= 1'b0;
+            self_hit_2  <= 1'b0;
+            cross_hit_1 <= 1'b0;
+            cross_hit_2 <= 1'b0;
+        end else if (scan_start && !scanning) begin
+            scan_idx <= 0;
+            scanning <= 1'b1;
+        end else if (scanning) begin
+            if (seg_col_1[scan_idx] == nxt_col_1 && seg_row_1[scan_idx] == nxt_row_1)
+                self_hit_1 <= 1'b1;
+            if (seg_col_2[scan_idx] == nxt_col_2 && seg_row_2[scan_idx] == nxt_row_2)
+                self_hit_2 <= 1'b1;
+            if (seg_col_2[scan_idx] == nxt_col_1 && seg_row_2[scan_idx] == nxt_row_1)
+                cross_hit_1 <= 1'b1;
+            if (seg_col_1[scan_idx] == nxt_col_2 && seg_row_1[scan_idx] == nxt_row_2)
+                cross_hit_2 <= 1'b1;
+
+            if (scan_idx == MAX_LEN - 1)
+                scanning <= 1'b0;
+            else
+                scan_idx <= scan_idx + 1'b1;
+        end
+    end
+
+    wire head_collide = (nxt_col_1 == nxt_col_2) && (nxt_row_1 == nxt_row_2);
 
     wire any_hit = wall_hit_1 | self_hit_1 | cross_hit_1 |
                    wall_hit_2 | self_hit_2 | cross_hit_2 | head_collide;
