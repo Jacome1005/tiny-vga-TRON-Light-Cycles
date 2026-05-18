@@ -24,11 +24,23 @@ module tt_um_tron_game  (
     );
 
     // ==========================================
-    // CONSTANTS
+    // CONSTANTS — REDUCED GRID
     // ==========================================
-    // Grid: 40 cols x 30 rows, playable cols 1-38, rows 1-28
-    localparam MAX_LEN  = 16;           // Retained augmented trail size
-    localparam LEN_BITS = 4;            // ceil(log2(24)) = 5
+    // Grid: 32 cols x 24 rows
+    //   Each cell = 640/(32*1) ... we use hpos/vpos halving then /10 or
+    //   simpler: use shift-based mapping for power-of-2 friendly cells.
+    //   With halving: effective 320x240 pixel space.
+    //   32 cols × 10px = 320, 24 rows × 10px = 240. Perfect fit.
+    //
+    //   Playable area: cols 1–30, rows 1–22 (walls at 0,31 and 0,23)
+
+    localparam GRID_COLS = 32;          // 5-bit column index
+    localparam GRID_ROWS = 24;          // 5-bit row index
+    localparam CELL_W    = 10;          // pixels per cell (in halved coords)
+    localparam CELL_H    = 10;
+
+    localparam MAX_LEN   = 32;           // Trail length
+    localparam LEN_BITS  = 5;           // ceil(log2(32))
 
     // Shared direction encoding
     localparam DIR_UP    = 2'd0;
@@ -64,19 +76,20 @@ module tt_um_tron_game  (
     end
 
     // ==========================================
-    // TRAIL BUFFERS
+    // TRAIL BUFFERS — now 5-bit col, 5-bit row, depth 8
+    // Saves: (6-5)*8*2 + (5-5)*8*2 cols + halved depth = significant
     // ==========================================
-    reg [5:0] seg_col_1 [0:MAX_LEN-1];
+    reg [4:0] seg_col_1 [0:MAX_LEN-1];
     reg [4:0] seg_row_1 [0:MAX_LEN-1];
     reg [LEN_BITS-1:0] head_ptr_1;
 
-    reg [5:0] seg_col_2 [0:MAX_LEN-1];
+    reg [4:0] seg_col_2 [0:MAX_LEN-1];
     reg [4:0] seg_row_2 [0:MAX_LEN-1];
     reg [LEN_BITS-1:0] head_ptr_2;
 
-    wire [5:0] head_col_1 = seg_col_1[head_ptr_1];
+    wire [4:0] head_col_1 = seg_col_1[head_ptr_1];
     wire [4:0] head_row_1 = seg_row_1[head_ptr_1];
-    wire [5:0] head_col_2 = seg_col_2[head_ptr_2];
+    wire [4:0] head_col_2 = seg_col_2[head_ptr_2];
     wire [4:0] head_row_2 = seg_row_2[head_ptr_2];
 
     // ==========================================
@@ -105,7 +118,7 @@ module tt_um_tron_game  (
     // ==========================================
     // NEXT HEAD POSITIONS
     // ==========================================
-    reg [5:0] nxt_col_1, nxt_col_2;
+    reg [4:0] nxt_col_1, nxt_col_2;
     reg [4:0] nxt_row_1, nxt_row_2;
 
     always @(*) begin
@@ -113,8 +126,8 @@ module tt_um_tron_game  (
         case (next_dir_1)
             DIR_UP:    nxt_row_1 = head_row_1 - 5'd1;
             DIR_DOWN:  nxt_row_1 = head_row_1 + 5'd1;
-            DIR_LEFT:  nxt_col_1 = head_col_1 - 6'd1;
-            DIR_RIGHT: nxt_col_1 = head_col_1 + 6'd1;
+            DIR_LEFT:  nxt_col_1 = head_col_1 - 5'd1;
+            DIR_RIGHT: nxt_col_1 = head_col_1 + 5'd1;
         endcase
     end
 
@@ -123,32 +136,32 @@ module tt_um_tron_game  (
         case (next_dir_2)
             DIR_UP:    nxt_row_2 = head_row_2 - 5'd1;
             DIR_DOWN:  nxt_row_2 = head_row_2 + 5'd1;
-            DIR_LEFT:  nxt_col_2 = head_col_2 - 6'd1;
-            DIR_RIGHT: nxt_col_2 = head_col_2 + 6'd1;
+            DIR_LEFT:  nxt_col_2 = head_col_2 - 5'd1;
+            DIR_RIGHT: nxt_col_2 = head_col_2 + 5'd1;
         endcase
     end
 
     // ==========================================
-    // WALL COLLISION (Reverted to 40x30 boundaries)
+    // WALL COLLISION (32x24 boundaries)
     // ==========================================
-    wire wall_hit_1 = (nxt_col_1 == 6'd0)  || (nxt_col_1 == 6'd39) ||
-                      (nxt_row_1 == 5'd0)  || (nxt_row_1 == 5'd29);
-    wire wall_hit_2 = (nxt_col_2 == 6'd0)  || (nxt_col_2 == 6'd39) ||
-                      (nxt_row_2 == 5'd0)  || (nxt_row_2 == 5'd29);
+    wire wall_hit_1 = (nxt_col_1 == 5'd0)  || (nxt_col_1 == 5'd31) ||
+                      (nxt_row_1 == 5'd0)  || (nxt_row_1 == 5'd23);
+    wire wall_hit_2 = (nxt_col_2 == 5'd0)  || (nxt_col_2 == 5'd31) ||
+                      (nxt_row_2 == 5'd0)  || (nxt_row_2 == 5'd23);
 
     // ==========================================
     // TRAIL COLLISION
     // ==========================================
-    genvar g;
+    genvar gc;
     wire [MAX_LEN-1:0] self_match_1, self_match_2;
     wire [MAX_LEN-1:0] cross_1to2,   cross_2to1;
-
+ 
     generate
-        for (g = 0; g < MAX_LEN; g = g + 1) begin : col_chk
-            assign self_match_1[g] = (seg_col_1[g] == nxt_col_1) && (seg_row_1[g] == nxt_row_1);
-            assign self_match_2[g] = (seg_col_2[g] == nxt_col_2) && (seg_row_2[g] == nxt_row_2);
-            assign cross_1to2[g]   = (seg_col_2[g] == nxt_col_1) && (seg_row_2[g] == nxt_row_1);
-            assign cross_2to1[g]   = (seg_col_1[g] == nxt_col_2) && (seg_row_1[g] == nxt_row_2);
+        for (gc = 0; gc < MAX_LEN; gc = gc + 1) begin : col_chk
+            assign self_match_1[gc] = (seg_col_1[gc] == nxt_col_1) && (seg_row_1[gc] == nxt_row_1);
+            assign self_match_2[gc] = (seg_col_2[gc] == nxt_col_2) && (seg_row_2[gc] == nxt_row_2);
+            assign cross_1to2[gc]   = (seg_col_2[gc] == nxt_col_1) && (seg_row_2[gc] == nxt_row_1);
+            assign cross_2to1[gc]   = (seg_col_1[gc] == nxt_col_2) && (seg_row_1[gc] == nxt_row_2);
         end
     endgenerate
 
@@ -162,7 +175,7 @@ module tt_um_tron_game  (
                    wall_hit_2 | self_hit_2 | cross_hit_2 | head_collide;
 
     // ==========================================
-    // GAME STATE & RESET (Facing Head-to-Head)
+    // GAME STATE & RESET
     // ==========================================
     reg game_over;
     integer i;
@@ -171,23 +184,23 @@ module tt_um_tron_game  (
         integer j;
         begin
             for (j = 0; j < MAX_LEN; j = j + 1) begin
-                seg_col_1[j] <= 6'd0; seg_row_1[j] <= 5'd0;
-                seg_col_2[j] <= 6'd0; seg_row_2[j] <= 5'd0;
+                seg_col_1[j] <= 5'd0; seg_row_1[j] <= 5'd0;
+                seg_col_2[j] <= 5'd0; seg_row_2[j] <= 5'd0;
             end
-            
-            // J1 starts at the LEFT border (col 4), centered vertically (row 14), moving RIGHT
-            seg_col_1[0] <= 6'd1; seg_row_1[0] <= 5'd14;
-            seg_col_1[1] <= 6'd2; seg_row_1[1] <= 5'd14;
-            seg_col_1[2] <= 6'd3; seg_row_1[2] <= 5'd14;
-            seg_col_1[3] <= 6'd4; seg_row_1[3] <= 5'd14;
+
+            // J1 starts left side (col 3), centered (row 11), moving RIGHT
+            seg_col_1[0] <= 5'd1;  seg_row_1[0] <= 5'd11;
+            seg_col_1[1] <= 5'd2;  seg_row_1[1] <= 5'd11;
+            seg_col_1[2] <= 5'd3;  seg_row_1[2] <= 5'd11;
+            seg_col_1[3] <= 5'd4;  seg_row_1[3] <= 5'd11;
             head_ptr_1   <= {LEN_BITS{1'b0}} + 3;
             direction_1  <= DIR_RIGHT;
 
-            // J2 starts at the RIGHT border (col 35), centered vertically (row 14), moving LEFT
-            seg_col_2[0] <= 6'd38; seg_row_2[0] <= 5'd14;
-            seg_col_2[1] <= 6'd37; seg_row_2[1] <= 5'd14;
-            seg_col_2[2] <= 6'd36; seg_row_2[2] <= 5'd14;
-            seg_col_2[3] <= 6'd35; seg_row_2[3] <= 5'd14;
+            // J2 starts right side (col 28), centered (row 11), moving LEFT
+            seg_col_2[0] <= 5'd30; seg_row_2[0] <= 5'd11;
+            seg_col_2[1] <= 5'd29; seg_row_2[1] <= 5'd11;
+            seg_col_2[2] <= 5'd28; seg_row_2[2] <= 5'd11;
+            seg_col_2[3] <= 5'd27; seg_row_2[3] <= 5'd11;
             head_ptr_2   <= {LEN_BITS{1'b0}} + 3;
             direction_2  <= DIR_LEFT;
 
@@ -199,7 +212,7 @@ module tt_um_tron_game  (
         if (~rst_n) begin
             do_reset;
         end else if (game_over) begin
-            if (|ui_in) do_reset;   
+            if (|ui_in) do_reset;
         end else if (game_tick) begin
             direction_1 <= next_dir_1;
             direction_2 <= next_dir_2;
@@ -220,21 +233,37 @@ module tt_um_tron_game  (
     end
 
     // ==========================================
-    // PIXEL CONTROLLERS & COORDINATES
+    // PIXEL MAPPING - CONTROLLERS & COORDINATES - 32x24 grid, 10x10 cells
     // ==========================================
-    wire [8:0] vx   = hpos[9:1];
-    wire [7:0] vy   = vpos[9:1];
-    wire [5:0] pcol = {1'b0, vx[8:3]};
-    wire [4:0] prow = vy[7:3];
-    wire [2:0] cx   = vx[2:0];
-    wire [2:0] cy   = vy[2:0];
+    // Halved coordinates: vx = 0..319, vy = 0..239
+    wire [8:0] vx = hpos[9:1];
+    wire [7:0] vy = vpos[9:1];
 
-    // Reverted Border
-    wire is_border = (pcol == 6'd0) || (pcol == 6'd39) ||
-                     (prow == 5'd0) || (prow == 5'd29);
+    // Division by 10 via reciprocal: floor(x * 205 / 2048) works for x < 320
+    // This avoids a hardware divider.
+    wire [17:0] col_prod = vx * 9'd205;
+    wire [4:0]  pcol     = col_prod[17:11];   // >> 11 = / 2048
+
+    wire [16:0] row_prod = vy * 8'd205;
+    wire [4:0]  prow     = row_prod[16:11];
+
+    // Intra-cell coordinates (mod 10) via subtraction
+    // pcol*10 and prow*10 reconstructed at full width, then truncated
+    wire [8:0] cell_origin_x = {4'd0, pcol} * 9'd10;
+    wire [7:0] cell_origin_y = {3'd0, prow} * 8'd10;
+    wire [3:0] cx = vx[3:0] - cell_origin_x[3:0]; // only low 4 bits matter
+    wire [3:0] cy = vy[3:0] - cell_origin_y[3:0];
+
+    // Border
+    wire is_border = (pcol == 5'd0) || (pcol == 5'd31) ||
+                     (prow == 5'd0) || (prow == 5'd23);
     wire border_checker = (cx[2] ^ cy[2]) & is_border;
 
-    // Snake segment hit tests
+    // ==========================================
+    // DRAW HIT TESTS
+    // ==========================================
+    
+    genvar g;
     wire [MAX_LEN-1:0] seg_hit_1, seg_hit_2;
     generate
         for (g = 0; g < MAX_LEN; g = g + 1) begin : draw_chk
@@ -249,56 +278,57 @@ module tt_um_tron_game  (
     wire is_head_2  = (pcol == head_col_2) && (prow == head_row_2);
 
     // ==========================================
-    // PROCEDURAL DIRECTIONAL SPRITE GENERATOR
+    // SPRITE GENERATOR (adapted to 10x10 cells)
     // ==========================================
     reg is_cycle_body_1, is_cycle_glow_1;
     reg is_cycle_body_2, is_cycle_glow_2;
 
-    // Player 1 Engine Geometry
     always @(*) begin
         is_cycle_body_1 = 1'b0;
         is_cycle_glow_1 = 1'b0;
         if (direction_1 == DIR_LEFT || direction_1 == DIR_RIGHT) begin
-            is_cycle_body_1 = (cy >= 3'd2 && cy <= 3'd5);
+            is_cycle_body_1 = (cy >= 4'd2 && cy <= 4'd7);
             if (direction_1 == DIR_RIGHT)
-                is_cycle_glow_1 = (cy >= 3'd3 && cy <= 3'd4) && (cx >= 3'd4 && cx <= 3'd6);
-            else 
-                is_cycle_glow_1 = (cy >= 3'd3 && cy <= 3'd4) && (cx >= 3'd1 && cx <= 3'd3);
+                is_cycle_glow_1 = (cy >= 4'd4 && cy <= 4'd5) && (cx >= 4'd6 && cx <= 4'd8);
+            else
+                is_cycle_glow_1 = (cy >= 4'd4 && cy <= 4'd5) && (cx >= 4'd1 && cx <= 4'd3);
         end else begin
-            is_cycle_body_1 = (cx >= 3'd2 && cx <= 3'd5);
+            is_cycle_body_1 = (cx >= 4'd2 && cx <= 4'd7);
             if (direction_1 == DIR_DOWN)
-                is_cycle_glow_1 = (cx >= 3'd3 && cx <= 3'd4) && (cy >= 3'd4 && cy <= 3'd6);
-            else 
-                is_cycle_glow_1 = (cx >= 3'd3 && cx <= 3'd4) && (cy >= 3'd1 && cy <= 3'd3);
+                is_cycle_glow_1 = (cx >= 4'd4 && cx <= 4'd5) && (cy >= 4'd6 && cy <= 4'd8);
+            else
+                is_cycle_glow_1 = (cx >= 4'd4 && cx <= 4'd5) && (cy >= 4'd1 && cy <= 4'd3);
         end
     end
 
-    // Player 2 Engine Geometry
     always @(*) begin
         is_cycle_body_2 = 1'b0;
         is_cycle_glow_2 = 1'b0;
         if (direction_2 == DIR_LEFT || direction_2 == DIR_RIGHT) begin
-            is_cycle_body_2 = (cy >= 3'd2 && cy <= 3'd5);
+            is_cycle_body_2 = (cy >= 4'd2 && cy <= 4'd7);
             if (direction_2 == DIR_RIGHT)
-                is_cycle_glow_2 = (cy >= 3'd3 && cy <= 3'd4) && (cx >= 3'd4 && cx <= 3'd6);
-            else 
-                is_cycle_glow_2 = (cy >= 3'd3 && cy <= 3'd4) && (cx >= 3'd1 && cx <= 3'd3);
+                is_cycle_glow_2 = (cy >= 4'd4 && cy <= 4'd5) && (cx >= 4'd6 && cx <= 4'd8);
+            else
+                is_cycle_glow_2 = (cy >= 4'd4 && cy <= 4'd5) && (cx >= 4'd1 && cx <= 4'd3);
         end else begin
-            is_cycle_body_2 = (cx >= 3'd2 && cx <= 3'd5);
+            is_cycle_body_2 = (cx >= 4'd2 && cx <= 4'd7);
             if (direction_2 == DIR_DOWN)
-                is_cycle_glow_2 = (cx >= 3'd3 && cx <= 3'd4) && (cy >= 3'd4 && cy <= 3'd6);
-            else 
-                is_cycle_glow_2 = (cx >= 3'd3 && cx <= 3'd4) && (cy >= 3'd1 && cy <= 3'd3);
+                is_cycle_glow_2 = (cx >= 4'd4 && cx <= 4'd5) && (cy >= 4'd6 && cy <= 4'd8);
+            else
+                is_cycle_glow_2 = (cx >= 4'd4 && cx <= 4'd5) && (cy >= 4'd1 && cy <= 4'd3);
         end
     end
 
     // ==========================================
-    // TRAIL (LIGHT WALL) FORM FACTOR
+    // TRAIL MASK (adapted to 10-pixel cells)
     // ==========================================
-    wire trail_mask_1 = (direction_1 == DIR_LEFT || direction_1 == DIR_RIGHT) ? (cy == 3'd3 || cy == 3'd4) : (cx == 3'd3 || cx == 3'd4);
-    wire trail_mask_2 = (direction_2 == DIR_LEFT || direction_2 == DIR_RIGHT) ? (cy == 3'd3 || cy == 3'd4) : (cx == 3'd3 || cx == 3'd4);
+    wire trail_mask_1 = (direction_1 == DIR_LEFT || direction_1 == DIR_RIGHT)
+                        ? (cy == 4'd4 || cy == 4'd5)
+                        : (cx == 4'd4 || cx == 4'd5);
+    wire trail_mask_2 = (direction_2 == DIR_LEFT || direction_2 == DIR_RIGHT)
+                        ? (cy == 4'd4 || cy == 4'd5)
+                        : (cx == 4'd4 || cx == 4'd5);
 
-    // Final Engine Assignments for Layers
     wire draw_glow_1 = is_head_1 && is_cycle_glow_1 && !is_border;
     wire draw_head_1 = is_head_1 && is_cycle_body_1 && !is_cycle_glow_1 && !is_border;
     wire draw_body_1 = is_snake_1 && !is_head_1 && trail_mask_1 && !is_border;
@@ -308,7 +338,7 @@ module tt_um_tron_game  (
     wire draw_body_2 = is_snake_2 && !is_head_2 && trail_mask_2 && !is_border;
 
     // ==========================================
-    // COLOR OUTPUT MIXER
+    // COLOR OUTPUT MIXER (unchanged logic)
     // ==========================================
     reg [1:0] r_out, g_out, b_out;
 
@@ -316,25 +346,25 @@ module tt_um_tron_game  (
         if (!display_on) begin
             r_out = 2'd0; g_out = 2'd0; b_out = 2'd0;
         end else if (game_over && (is_snake_1 || is_snake_2) && !is_border) begin
-            r_out = 2'd3; g_out = 2'd0; b_out = 2'd0; 
+            r_out = 2'd3; g_out = 2'd0; b_out = 2'd0;
         end else if (draw_glow_1) begin
-            r_out = 2'd3; g_out = 2'd3; b_out = 2'd1; 
+            r_out = 2'd3; g_out = 2'd3; b_out = 2'd1;
         end else if (draw_head_1) begin
-            r_out = 2'd2; g_out = 2'd1; b_out = 2'd0; 
+            r_out = 2'd2; g_out = 2'd1; b_out = 2'd0;
         end else if (draw_body_1) begin
-            r_out = 2'd3; g_out = 2'd1; b_out = 2'd0; 
+            r_out = 2'd3; g_out = 2'd1; b_out = 2'd0;
         end else if (draw_glow_2) begin
-            r_out = 2'd1; g_out = 2'd3; b_out = 2'd3; 
+            r_out = 2'd1; g_out = 2'd3; b_out = 2'd3;
         end else if (draw_head_2) begin
-            r_out = 2'd0; g_out = 2'd1; b_out = 2'd2; 
+            r_out = 2'd0; g_out = 2'd1; b_out = 2'd2;
         end else if (draw_body_2) begin
-            r_out = 2'd0; g_out = 2'd3; b_out = 2'd3; 
+            r_out = 2'd0; g_out = 2'd3; b_out = 2'd3;
         end else if (is_border) begin
             r_out = {1'b0, border_checker};
             g_out = {1'b0, border_checker};
             b_out = 2'd1;
         end else begin
-            r_out = 2'd0; g_out = 2'd0; b_out = 2'd0; 
+            r_out = 2'd0; g_out = 2'd0; b_out = 2'd0;
         end
     end
 
